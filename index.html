@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yard Design Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/konva@9.3.6/konva.min.js"></script>
+    <style>
+        /* Basic styling for clarity */
+        body { font-family: 'Inter', sans-serif; }
+        #container { /* Konva container needs explicit size */
+            width: 100%;
+            height: 500px; /* Default height, adjust as needed */
+            background-color: #f0f0f0; /* Placeholder background */
+            border: 1px solid #ccc;
+            border-radius: 0.375rem; /* rounded-md */
+            overflow: hidden; /* Ensure contents stay within bounds */
+            position: relative; /* Needed for absolute positioning of potential overlays */
+            cursor: default; /* Default cursor for the stage */
+        }
+        .plant-item { /* Container for each plant in the sidebar */
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        .plant-item:hover {
+            transform: scale(1.05); /* Slightly smaller hover effect */
+        }
+        .plant-thumbnail {
+             /* Let the container handle padding/border */
+            max-width: 100%; /* Ensure image scales down */
+            height: 60px; /* Fixed height for consistency */
+            width: 60px; /* Fixed width for consistency */
+            object-fit: cover; /* Cover the area, might crop */
+            margin-bottom: 4px; /* Space between image and name */
+            background-color: #e5e7eb; /* gray-200 for unloaded */
+        }
+         .plant-name {
+            font-size: 0.75rem; /* text-xs */
+            line-height: 1rem;
+            color: #4b5563; /* text-gray-600 */
+        }
+        /* Style for the message box */
+        #message-box {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            z-index: 1000;
+            display: none; /* Hidden by default */
+            font-size: 0.875rem; /* text-sm */
+        }
+        /* Change cursor when a plant is selected */
+        body.plant-selected #container {
+             cursor: copy; /* Indicate placement action */
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-4 md:p-8"> {/* Removed plant-selected class initially */}
+
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-2xl md:text-3xl font-bold text-gray-800 mb-6 text-center">Yard Design Visualizer (MVP)</h1>
+
+        <div class="flex flex-col md:flex-row gap-6">
+
+            <div class="w-full md:w-1/4 bg-white p-4 rounded-lg shadow flex flex-col">
+                <h2 class="text-lg font-semibold mb-4 text-gray-700">Controls & Plants</h2>
+
+                <div class="mb-4">
+                    <label for="image-upload" class="block text-sm font-medium text-gray-700 mb-2">Upload Yard Image:</label>
+                    <input type="file" id="image-upload" accept="image/*" class="block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-md file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-blue-50 file:text-blue-700
+                        hover:file:bg-blue-100 cursor-pointer
+                    "/>
+                </div>
+                <p class="text-xs text-gray-500 mb-4">Upload a photo of your yard to begin.</p>
+
+                <hr class="my-4">
+
+                <div class="mb-4">
+                     <label for="plant-search" class="block text-sm font-medium text-gray-700 mb-2">Search Plants:</label>
+                     <input type="text" id="plant-search" placeholder="E.g., Spruce, Maple, Grass..." class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                </div>
+
+                <h3 class="text-md font-semibold mb-3 text-gray-700">Select Plants:</h3>
+                 <p class="text-xs text-gray-500 mb-2">Click a plant below, then click on the yard to place it. Select a placed plant and press DEL/Backspace to remove.</p> {/* Added delete instruction */}
+                <div class="flex-grow overflow-y-auto pr-2" style="min-height: 200px;">
+                    <div id="plant-selection" class="grid grid-cols-3 gap-3">
+                        {/* Plant items will be added here by JS */}
+                    </div>
+                </div>
+                 {/* Removed redundant instruction p tag */}
+            </div>
+
+            <div class="w-full md:w-3/4 bg-white p-4 rounded-lg shadow">
+                 <h2 class="text-lg font-semibold mb-4 text-gray-700">Design Area</h2>
+                <div id="container" tabindex="1"></div> {/* Added tabindex to allow container to receive focus for key events */}
+            </div>
+
+        </div>
+    </div>
+
+    <div id="message-box"></div>
+
+    <script>
+        // --- Configuration ---
+        // *** REVERTED to stable placehold.co URLs for MVP reliability ***
+        const PLANT_ASSETS = [
+             // Maple Trees
+            { name: "Red Maple", src: "https://placehold.co/100x120/A22C2C/FFF?text=Red+Maple" }, // Colored Placeholder
+            { name: "Sugar Maple", src: "https://placehold.co/100x120/D4AF37/FFF?text=Sugar+Maple" }, // Colored Placeholder
+            { name: "Japanese Maple", src: "https://placehold.co/90x100/8B0000/FFF?text=Japanese+Maple" }, // Colored Placeholder
+            { name: "Silver Maple", src: "https://placehold.co/110x130/C0C0C0/000?text=Silver+Maple" }, // Colored Placeholder
+
+            // Evergreen Trees
+            { name: "Norway Spruce", src: "https://placehold.co/80x120/006400/FFF?text=Norway+Spruce" }, // Colored Placeholder
+            { name: "Blue Spruce", src: "https://placehold.co/80x120/ADD8E6/000?text=Blue+Spruce" }, // Colored Placeholder
+            { name: "White Pine", src: "https://placehold.co/90x120/2E8B57/FFF?text=White+Pine" }, // Colored Placeholder
+            { name: "Arborvitae", src: "https://placehold.co/70x110/556B2F/FFF?text=Arborvitae" }, // Colored Placeholder
+
+             // Ornamental Grasses
+            { name: "Fountain Grass", src: "https://placehold.co/70x90/DEB887/000?text=Fountain+Grass" }, // Colored Placeholder
+            { name: "Feather Reed Grass", src: "https://placehold.co/60x100/F5DEB3/000?text=Feather+Reed" }, // Colored Placeholder
+            { name: "Blue Fescue", src: "https://placehold.co/60x60/6495ED/FFF?text=Blue+Fescue" }, // Colored Placeholder
+            { name: "Zebra Grass", src: "https://placehold.co/80x100/90EE90/000?text=Zebra+Grass" }, // Colored Placeholder
+
+             // Other examples (can be removed if not needed)
+            { name: "Hosta", src: "https://placehold.co/100x60/3CB371/FFF?text=Hosta" }, // Colored Placeholder
+            { name: "Lavender", src: "https://placehold.co/60x80/E6E6FA/000?text=Lavender" }, // Colored Placeholder
+        ];
+
+        // --- Global Variables ---
+        let stage;
+        let backgroundLayer;
+        let imageLayer; // Layer for draggable plants
+        let transformer; // To resize elements
+        let selectedPlantSrc = null; // Which plant is selected from the sidebar
+
+        // --- DOM Element References (will be assigned in DOMContentLoaded) ---
+        let plantSelectionDiv;
+        let plantSearchInput;
+        let imageUploadInput;
+        let messageBox;
+        let konvaContainer;
+
+
+        // --- Utility Functions ---
+        function showMessage(message, duration = 3000) {
+            if (!messageBox) return; // Ensure messageBox exists
+            messageBox.textContent = message;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, duration);
+        }
+
+        // --- Initialization ---
+        function initializeKonva() {
+            if (!konvaContainer) return; // Ensure container exists
+            const containerWidth = konvaContainer.offsetWidth;
+            const containerHeight = Math.max(konvaContainer.offsetHeight, 400); // Use CSS height or 400px minimum
+
+            stage = new Konva.Stage({
+                container: 'container',
+                width: containerWidth,
+                height: containerHeight,
+            });
+
+            backgroundLayer = new Konva.Layer();
+            imageLayer = new Konva.Layer(); // Layer for plants
+
+            stage.add(backgroundLayer);
+            stage.add(imageLayer);
+
+            transformer = new Konva.Transformer({
+                nodes: [],
+                keepRatio: true,
+                borderStroke: 'blue',
+                anchorStroke: 'blue',
+                anchorFill: 'lightblue',
+                anchorSize: 8,
+                rotateEnabled: false,
+            });
+            imageLayer.add(transformer);
+
+            // --- Stage Event Handling ---
+            stage.on('click tap', function (e) {
+                const pointerPos = stage.getPointerPosition();
+
+                // Ignore clicks on the transformer itself
+                if (e.target.getParent() instanceof Konva.Transformer) {
+                    return;
+                }
+
+                // Check if clicking on an existing plant
+                if (e.target.hasName('plant-image')) {
+                    transformer.nodes([e.target]);
+                    if (selectedPlantSrc) {
+                        selectedPlantSrc = null;
+                        updatePlantSelectionUI();
+                        document.body.classList.remove('plant-selected');
+                    }
+                    // Give focus to the container to listen for key events
+                    konvaContainer.focus();
+                    return;
+                }
+
+                // Check if a plant is selected from the sidebar AND the click is on the stage or background
+                if (selectedPlantSrc && (e.target === stage || e.target.hasName('background-image'))) {
+                    addPlantToCanvas(selectedPlantSrc, pointerPos.x, pointerPos.y);
+                    selectedPlantSrc = null;
+                    updatePlantSelectionUI();
+                    document.body.classList.remove('plant-selected');
+                    return;
+                }
+
+                // If clicking on empty stage area or background without a plant selected from sidebar
+                if (e.target === stage || e.target.hasName('background-image')) {
+                    transformer.nodes([]); // Deselect any selected plant on the canvas
+                }
+            });
+
+
+            window.addEventListener('resize', fitStageIntoParentContainer);
+            fitStageIntoParentContainer(); // Initial fit
+
+            console.log("Konva stage initialized.");
+            showMessage("Konva stage ready. Upload an image.", 2000);
+        }
+
+        // --- Image Loading ---
+        function loadImageOntoCanvas(file) {
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                const img = new Image();
+                img.onload = function () {
+                    if (!stage || !backgroundLayer || !imageLayer || !transformer) return;
+
+                    backgroundLayer.destroyChildren();
+                    imageLayer.destroyChildren();
+                    imageLayer.add(transformer);
+                    transformer.nodes([]);
+
+                    const stageWidth = stage.width();
+                    const stageHeight = stage.height();
+                    const scale = Math.min(stageWidth / img.width, stageHeight / img.height);
+                    const imageWidth = img.width * scale;
+                    const imageHeight = img.height * scale;
+                    const imageX = (stageWidth - imageWidth) / 2;
+                    const imageY = (stageHeight - imageHeight) / 2;
+
+                    const konvaImage = new Konva.Image({
+                        x: imageX, y: imageY, image: img,
+                        width: imageWidth, height: imageHeight,
+                        name: 'background-image'
+                    });
+
+                    backgroundLayer.add(konvaImage);
+                    console.log("Background image added.");
+                    showMessage("Background image loaded.", 2000);
+                };
+                 img.onerror = function() {
+                    console.error("Error loading image.");
+                    showMessage("Error: Could not load the image file.", 5000);
+                };
+                img.src = event.target.result;
+            };
+            reader.onerror = function() {
+                 console.error("Error reading file.");
+                 showMessage("Error: Could not read the file.", 5000);
+            }
+            reader.readAsDataURL(file);
+        }
+
+        // --- Plant Handling ---
+        function populatePlantSelection(searchTerm = '') {
+             if (!plantSelectionDiv) return;
+
+            plantSelectionDiv.innerHTML = '';
+            const lowerSearchTerm = searchTerm.toLowerCase().trim();
+
+            const filteredPlants = PLANT_ASSETS.filter(plant =>
+                plant.name.toLowerCase().includes(lowerSearchTerm)
+            );
+
+            if (filteredPlants.length === 0 && lowerSearchTerm !== '') {
+                plantSelectionDiv.innerHTML = '<p class="col-span-3 text-sm text-gray-500 text-center">No plants found.</p>';
+            }
+
+            filteredPlants.forEach(plant => {
+                const plantItemDiv = document.createElement('div');
+                plantItemDiv.classList.add('plant-item', 'p-1', 'border', 'border-transparent', 'rounded');
+                plantItemDiv.dataset.plantSrc = plant.src; // Store src on the container
+
+                const imgElement = document.createElement('img');
+                imgElement.src = plant.src;
+                imgElement.alt = plant.name;
+                // No longer strictly need crossorigin for placehold.co, but doesn't hurt
+                imgElement.setAttribute('crossorigin', 'anonymous');
+                imgElement.classList.add('plant-thumbnail', 'rounded'); // Basic image styling
+                imgElement.onerror = function() {
+                    // This should ideally not trigger with placehold.co URLs unless network error
+                    console.warn(`Could not load plant image: ${plant.src}`);
+                    this.alt = `${plant.name} (Image unavailable)`;
+                    // Keep the error placeholder as a fallback
+                    this.src = 'https://placehold.co/60x60/eee/ccc?text=Error';
+                };
+
+                const nameElement = document.createElement('span');
+                nameElement.textContent = plant.name;
+                nameElement.classList.add('plant-name');
+
+                plantItemDiv.appendChild(imgElement);
+                plantItemDiv.appendChild(nameElement);
+
+                // Add click listener to the container div
+                plantItemDiv.addEventListener('click', () => {
+                    selectedPlantSrc = plant.src;
+                    console.log("Selected plant:", plant.name);
+                    showMessage(`Selected ${plant.name}. Click on the yard to place it.`, 2500);
+                    updatePlantSelectionUI(plantItemDiv); // Highlight selected container
+                    if (transformer) transformer.nodes([]); // Deselect any canvas items
+                    document.body.classList.add('plant-selected'); // Add class to body for cursor change
+                });
+
+                // Append the container div to the main selection area
+                plantSelectionDiv.appendChild(plantItemDiv);
+            });
+        }
+
+
+         // Visually indicate which plant is selected in the sidebar
+        function updatePlantSelectionUI(selectedItemDiv = null) {
+            document.querySelectorAll('.plant-item').forEach(div => {
+                // Use Tailwind classes for highlighting the container div
+                div.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2', 'border-blue-300', 'bg-blue-50');
+                div.classList.add('border-transparent'); // Ensure border is transparent when not selected
+                if (div === selectedItemDiv) {
+                    div.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2', 'border-blue-300', 'bg-blue-50');
+                    div.classList.remove('border-transparent');
+                }
+            });
+             // If nothing is selected, remove the placement cursor class
+             if (!selectedItemDiv) {
+                 document.body.classList.remove('plant-selected');
+             }
+        }
+
+
+        function addPlantToCanvas(plantSrc, x, y) {
+            if (!plantSrc || !imageLayer) return;
+
+            const plantImg = new Image();
+             // No longer strictly need crossorigin for placehold.co, but doesn't hurt
+            plantImg.crossOrigin = 'Anonymous';
+
+            plantImg.onload = function() {
+                const MAX_INITIAL_DIM = 100;
+                let imgWidth = plantImg.width;
+                let imgHeight = plantImg.height;
+
+                // For placeholders, the size is in the URL, but Konva reads actual dimensions once loaded
+                // We might want to rely less on intrinsic size for placeholders and set a default
+                const defaultSize = 80; // Example default size for placed placeholders
+                imgWidth = defaultSize;
+                imgHeight = defaultSize;
+
+                 const baseScale = 0.7; // Apply scaling even to default size
+                 imgWidth *= baseScale;
+                 imgHeight *= baseScale;
+
+
+                const placeX = x - imgWidth / 2; // Center placed image on cursor
+                const placeY = y - imgHeight / 2; // Center placed image on cursor
+
+                const konvaPlant = new Konva.Image({
+                    x: placeX, y: placeY, image: plantImg,
+                    width: imgWidth, height: imgHeight, // Use calculated size
+                    draggable: true,
+                    name: 'plant-image' // Name is important for click logic
+                });
+
+                 // Add drag bounds
+                konvaPlant.dragBoundFunc(function (pos) {
+                    if (!stage) return { x:0, y:0 };
+                    const stageWidth = stage.width();
+                    const stageHeight = stage.height();
+                    const box = konvaPlant.getClientRect();
+
+                    const newX = Math.max(0, Math.min(pos.x, stageWidth - box.width));
+                    const newY = Math.max(0, Math.min(pos.y, stageHeight - box.height));
+                    return { x: newX, y: newY };
+                });
+
+                imageLayer.add(konvaPlant);
+                console.log("Added plant to canvas at:", x, y);
+            };
+            plantImg.onerror = function() {
+                // This should be rare now, likely network error
+                console.error("Error loading plant image:", plantSrc);
+                showMessage(`Error loading image for: ${plantSrc}. Check URL.`, 5000);
+            }
+            plantImg.src = plantSrc;
+        }
+
+
+        // --- Responsive Stage Resizing ---
+        function fitStageIntoParentContainer() {
+            if (!konvaContainer || !stage) return;
+
+            const containerWidth = konvaContainer.offsetWidth;
+            const containerHeight = Math.max(konvaContainer.offsetHeight, 400);
+
+            stage.width(containerWidth);
+            stage.height(containerHeight);
+
+            const bgImage = backgroundLayer.findOne('.background-image');
+            if (bgImage) {
+                 const img = bgImage.image();
+                 if (!img) return;
+
+                 const scale = Math.min(containerWidth / img.width, containerHeight / img.height);
+                 const imageWidth = img.width * scale;
+                 const imageHeight = img.height * scale;
+                 const imageX = (containerWidth - imageWidth) / 2;
+                 const imageY = (containerHeight - imageHeight) / 2;
+
+                 bgImage.setAttrs({ x: imageX, y: imageY, width: imageWidth, height: imageHeight });
+            }
+        }
+
+        // --- Function to handle deleting selected node ---
+        function deleteSelectedNode() {
+            if (!transformer) return;
+            const nodes = transformer.nodes();
+            if (nodes.length > 0) {
+                const selectedNode = nodes[0]; // Assuming only one node selected at a time
+                transformer.nodes([]); // Detach transformer first
+                selectedNode.destroy(); // Remove node from layer and memory
+                console.log("Deleted selected plant.");
+                showMessage("Plant removed.", 1500);
+            }
+        }
+
+
+        // --- Event Listeners Setup ---
+        function setupEventListeners() {
+            if (!imageUploadInput || !plantSearchInput || !konvaContainer) { // Added check for konvaContainer
+                console.error("Error: Could not find required input elements for listeners.");
+                return;
+            }
+
+            imageUploadInput.addEventListener('change', function (event) {
+                const file = event.target.files[0];
+                if (file) {
+                    console.log("Image file selected:", file.name);
+                    showMessage("Loading image...", 2000);
+                    loadImageOntoCanvas(file);
+                }
+            });
+
+            plantSearchInput.addEventListener('input', function(event) {
+                populatePlantSelection(event.target.value);
+                selectedPlantSrc = null;
+                updatePlantSelectionUI();
+                 document.body.classList.remove('plant-selected');
+            });
+
+            // Keyboard event listener for delete
+            konvaContainer.addEventListener('keydown', function(event) {
+                if (event.key === 'Delete' || event.key === 'Backspace') {
+                    event.preventDefault(); // Prevent browser back navigation on Backspace
+                    deleteSelectedNode();
+                }
+            });
+        }
+
+        // --- Document Ready ---
+        document.addEventListener('DOMContentLoaded', () => {
+            plantSelectionDiv = document.getElementById('plant-selection');
+            plantSearchInput = document.getElementById('plant-search');
+            imageUploadInput = document.getElementById('image-upload');
+            messageBox = document.getElementById('message-box');
+            konvaContainer = document.getElementById('container');
+
+            if (!plantSelectionDiv || !plantSearchInput || !imageUploadInput || !messageBox || !konvaContainer) {
+                 console.error("Initialization failed: One or more essential HTML elements not found.");
+                 if (typeof alert !== 'undefined') {
+                    alert("Error initializing the application. Please check the console for details.");
+                 }
+                 return;
+            }
+
+            initializeKonva();
+            populatePlantSelection();
+            setupEventListeners(); // Setup listeners after elements are available and Konva is initialized
+        });
+
+    </script>
+
+</body>
+</html>
